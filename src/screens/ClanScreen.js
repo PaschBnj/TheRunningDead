@@ -1,34 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
-import * as clanService from '../services/clanService';
+import * as firebaseService from '../services/firebaseService';
 
-export default function ClanScreen({ visible, onClose, playerId }) {
+export default function ClanScreen({ visible, onClose, playerId, currentClanId }) {
   const [clanId, setClanId] = useState('');
   const [clanName, setClanName] = useState('');
   const [clanPhoto, setClanPhoto] = useState('');
 
   useEffect(() => {
     if (!visible) return;
-    const c = clanService.getClanForPlayer(playerId);
-    setClanId(c ? c.id : '');
-    setClanName(c ? c.name : '');
-    setClanPhoto(c ? c.photo || '' : '');
-  }, [visible]);
+    setClanId(currentClanId || '');
+    setClanName('');
+    setClanPhoto('');
+  }, [visible, currentClanId]);
 
   function handleCreate() {
     if (!clanId || !clanName) { Alert.alert('Preencha', 'Informe ID e nome do clã'); return; }
-    clanService.createClan(clanId, clanName, clanPhoto || null);
-    clanService.joinClan(clanId, playerId);
-    Alert.alert('Clã criado', `Você criou e entrou no clã ${clanName}`);
-    onClose();
+    firebaseService.setClanMembership(playerId, clanId, clanName, clanPhoto || null)
+      .then(() => {
+        Alert.alert('Clã criado', `Você criou e entrou no clã ${clanName}`);
+        onClose();
+      })
+      .catch(e => Alert.alert('Erro', e.message));
   }
 
   function handleJoin() {
-    try {
-      clanService.joinClan(clanId, playerId);
-      Alert.alert('Entrou', `Você entrou no clã ${clanId}`);
-      onClose();
-    } catch (e) { Alert.alert('Erro', e.message); }
+    if (!clanId) { Alert.alert('Preencha', 'Informe ID do clã'); return; }
+    firebaseService.setClanMembership(playerId, clanId, clanName || null, clanPhoto || null)
+      .then(() => {
+        Alert.alert('Entrou', `Você entrou no clã ${clanId}`);
+        onClose();
+      })
+      .catch(e => Alert.alert('Erro', e.message));
   }
 
   return (

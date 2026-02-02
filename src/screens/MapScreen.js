@@ -9,11 +9,10 @@ import InventoryScreen from './InventoryScreen';
 import ClanScreen from './ClanScreen';
 import * as items from '../data/items';
 import * as inventoryService from '../services/inventoryService';
-import * as clanService from '../services/clanService';
 import * as playerService from '../services/playerService';
 import * as firebaseService from '../services/firebaseService';
 
-export default function MapScreen() {
+export default function MapScreen({ user }) {
   const MAX_HEALTH = 250; // Constante para evitar erros de cálculo na barra
 
   const [player, setPlayer] = useState(null);
@@ -26,6 +25,11 @@ export default function MapScreen() {
   const [buffActive, setBuffActive] = useState(false);
   const [health, setHealth] = useState(MAX_HEALTH);
   const [gameOver, setGameOver] = useState(false);
+  const [clanMembers, setClanMembers] = useState({}); // playerId -> clanId
+  const [clans, setClans] = useState({}); // clanId -> {name, photo}
+
+  const playerId = user?.uid || 'me';
+  const playerName = user?.displayName || 'Você';
 
   // --- REFS PARA CORRIGIR O PROBLEMA DO "FRAME CONGELADO" ---
   const playerRef = useRef(null);
@@ -51,56 +55,58 @@ export default function MapScreen() {
   }, [health]);
 
   useEffect(() => {
-    // tentativa de inicializar Firebase
     let fbUnsubPlayers = null;
     let fbUnsubChests = null;
-    try {
-      const cfg = require('../config/firebaseConfig').default;
-      if (cfg && firebaseService.init(cfg)) {
-        fbUnsubPlayers = firebaseService.subscribeToPlayers(list => {
-          setOthers(list.filter(p => p.id !== 'me'));
-        });
-        fbUnsubChests = firebaseService.subscribeToChests(list => {
-          setChests(list.map(c => ({ id: c.id, coords: c.coords, opened: !!c.opened })));
-        });
-      }
-    } catch (e) {
-      // sem config de firebase, continua em local
+    let fbUnsubZombies = null;
+    let fbUnsubClanMembers = null;
+    let fbUnsubClans = null;
+    if (firebaseService.isReady()) {
+      fbUnsubPlayers = firebaseService.subscribeToPlayers(list => {
+        setOthers(list.filter(p => p.id !== playerId));
+      });
+      fbUnsubChests = firebaseService.subscribeToChests(list => {
+        setChests(list.map(c => ({ id: c.id, coords: c.coords, opened: !!c.opened })));
+      });
+      fbUnsubZombies = firebaseService.subscribeToZombies(list => {
+        setZombies(list);
+      });
+      fbUnsubClanMembers = firebaseService.subscribeToClanMembers(map => setClanMembers(map));
+      fbUnsubClans = firebaseService.subscribeToClans(map => setClans(map));
     }
 
+    let positionUnsub = null;
     getLocationPermission().then(loc => {
       if (loc) {
-        watchPosition(pos => {
+        positionUnsub = watchPosition(pos => {
           const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-          const pData = { id: 'me', coords };
-          
-          setPlayer(pData);
-          // O Ref atualiza no useEffect acima, mas garantimos aqui também por segurança
-          playerRef.current = pData; 
+          const pData = { id: playerId, coords };
 
-          clanService.setPlayerPosition('me', coords);
-          playerService.setPlayerPosition('me', coords);
-          if (firebaseService.isReady()) firebaseService.syncPlayerPosition('me', { name: 'me', coords });
+          setPlayer(pData);
+          playerRef.current = pData;
+
+          playerService.setPlayerPosition(playerId, coords);
+          if (firebaseService.isReady()) {
+            firebaseService.syncPlayerPosition(playerId, { name: playerName, coords });
+          }
         });
       } else {
         Alert.alert('Permissão negada', 'Permita acesso à localização para jogar!.');
       }
     });
 
-    // spawn inicial
     const initialZ = [createZombieNearPlayer(120), createZombieNearPlayer(180)];
     setZombies(initialZ);
     const initialChests = [createChestNearPlayer(140), createChestNearPlayer(200)];
     setChests(initialChests);
 
     if (firebaseService.isReady()) {
+      initialZ.forEach(z => firebaseService.createZombie(z));
       initialChests.forEach(c => firebaseService.createChest({ id: c.id, coords: c.coords, opened: false }));
     }
 
     playerService.createPlayer('p1', 'Alice', { latitude: (player?.coords.latitude || 37.78825) + 0.0009, longitude: (player?.coords.longitude || -122.4324) + 0.0002 }, null);
     playerService.createPlayer('p2', 'Bob', { latitude: (player?.coords.latitude || 37.78825) - 0.0009, longitude: (player?.coords.longitude || -122.4324) - 0.0004 }, null);
 
-    // INICIA OS INTERVALOS
     tickRef.current = setInterval(() => tickMove(), 1000);
     buffRef.current = setInterval(() => checkBuff(), 2000);
     spawnRef.current = setInterval(() => spawnTick(), 12000);
@@ -112,7 +118,7 @@ export default function MapScreen() {
       setOthers(playerService.getPlayers());
     }, 3000);
 
-    setInventory(inventoryService.getInventory('me'));
+    setInventory(inventoryService.getInventory(playerId));
 
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
@@ -120,10 +126,14 @@ export default function MapScreen() {
       if (spawnRef.current) clearInterval(spawnRef.current);
       if (damageRef.current) clearInterval(damageRef.current);
       clearInterval(playersTick);
+      if (positionUnsub) positionUnsub();
       if (fbUnsubPlayers) fbUnsubPlayers();
       if (fbUnsubChests) fbUnsubChests();
+      if (fbUnsubZombies) fbUnsubZombies();
+      if (fbUnsubClanMembers) fbUnsubClanMembers();
+      if (fbUnsubClans) fbUnsubClans();
     };
-  }, []);
+  }, [playerId, playerName]);
 
   // --- Funções Auxiliares de Criação ---
   
@@ -185,16 +195,29 @@ export default function MapScreen() {
     });
     setChests(prev => {
       const next = prev.length >= 20 ? prev.slice(-19) : prev.slice();
-      next.push(createChestNearPlayer(150 + Math.random() * 300));
+      const newChest = createChestNearPlayer(150 + Math.random() * 300);
+      next.push(newChest);
+      if (firebaseService.isReady()) firebaseService.createChest({ id: newChest.id, coords: newChest.coords, opened: false });
       return next;
     });
   }
 
   function checkBuff() {
-    try {
-      const active = clanService.isPlayerBuffed('me');
-      setBuffActive(active);
-    } catch (e) { }
+    if (!playerRef.current) { setBuffActive(false); return; }
+    const myClan = clanMembers[playerId];
+    if (!myClan) { setBuffActive(false); return; }
+    const myPos = playerRef.current.coords;
+    const sameClanPlayers = others.filter(p => clanMembers[p.id] === myClan);
+    const active = sameClanPlayers.some(p => {
+      try {
+        const distM = turf.distance(
+          turf.point([myPos.longitude, myPos.latitude]),
+          turf.point([p.coords.longitude, p.coords.latitude])
+        ) * 1000;
+        return distM <= 15;
+      } catch (e) { return false; }
+    });
+    setBuffActive(active);
   }
 
   // --- LÓGICA CORRIGIDA: MOVIMENTO DOS ZUMBIS ---
@@ -277,17 +300,17 @@ export default function MapScreen() {
       return;
     }
     
-    const luckyLevel = clanService.isPlayerBuffed('me') ? 1 : 0;
+    const luckyLevel = clanService.isPlayerBuffed(playerId) ? 1 : 0;
     const loot = items.getRandomLoot(luckyLevel);
 
     if (firebaseService.isReady()) {
-      firebaseService.markChestOpened(chest.id, 'me');
-      inventoryService.addItem('me', loot);
-      setInventory(inventoryService.getInventory('me'));
+      firebaseService.markChestOpened(chest.id, playerId);
+      inventoryService.addItem(playerId, loot);
+      setInventory(inventoryService.getInventory(playerId));
       Alert.alert('Baú aberto', `Você encontrou: ${loot.name} x${loot.quantity} (sincronizado)`);
     } else {
-      inventoryService.addItem('me', loot);
-      setInventory(inventoryService.getInventory('me'));
+      inventoryService.addItem(playerId, loot);
+      setInventory(inventoryService.getInventory(playerId));
       Alert.alert('Baú aberto', `Você encontrou: ${loot.name} x${loot.quantity}`);
     }
 
@@ -375,15 +398,16 @@ export default function MapScreen() {
           </TouchableOpacity>
           <View style={{ marginLeft: 8 }}>{
             (() => {
-              const c = clanService.getClanForPlayer('me');
+              const cId = clanMembers[playerId];
+              const c = cId ? clans[cId] : null;
               return c && c.photo ? <Image source={{ uri: c.photo }} style={{ width: 36, height: 36, borderRadius: 18 }} /> : null;
             })()
           }</View>
         </View>
       </View>
 
-      <InventoryScreen visible={showInventory} initialTargetId={null} onClose={() => { setShowInventory(false); setInventory(inventoryService.getInventory('me')) }} playerId={'me'} />
-      <ClanScreen visible={showClan} onClose={() => setShowClan(false)} playerId={'me'} />
+      <InventoryScreen visible={showInventory} initialTargetId={null} onClose={() => { setShowInventory(false); setInventory(inventoryService.getInventory(playerId)) }} playerId={playerId} />
+      <ClanScreen visible={showClan} onClose={() => setShowClan(false)} playerId={playerId} currentClanId={clanMembers[playerId] || ''} />
     </View>
   );
 }

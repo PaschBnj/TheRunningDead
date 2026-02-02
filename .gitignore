@@ -4,3 +4,4 @@ web-build/
 .env
 .DS_Store
 .vscode/
+src/config/firebaseConfig.js

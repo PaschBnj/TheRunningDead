@@ -1,6 +1,18 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, doc, setDoc, onSnapshot, runTransaction } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import {
+  initializeAuth,
+  getReactNativePersistence,
+  signInAnonymously,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithCredential,
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithPhoneNumber
+} from 'firebase/auth/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let app = null;
 let db = null;
@@ -12,12 +24,18 @@ export function init(config) {
   try {
     if (getApps().length === 0) {
       app = initializeApp(config);
-      db = getFirestore(app);
-      auth = getAuth(app);
-      signInAnonymously(auth).catch(() => {});
-      ready = true;
+    } else {
+      app = getApps()[0];
     }
-    return ready;
+    db = getFirestore(app);
+    if (!auth) {
+      auth = initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
+    }
+    if (!auth.currentUser) {
+      signInAnonymously(auth).catch(() => {});
+    }
+    ready = true;
+    return true;
   } catch (e) {
     console.warn('firebase init error', e);
     return false;
@@ -26,6 +44,48 @@ export function init(config) {
 
 export function isReady() {
   return ready && !!db;
+}
+
+export function getAuthInstance() {
+  return auth;
+}
+
+export function onAuthStateChange(callback) {
+  if (!auth) return () => {};
+  return onAuthStateChanged(auth, callback);
+}
+
+export async function signInWithEmail(email, password) {
+  if (!auth) throw new Error('Firebase não inicializado');
+  return signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function createAccountWithEmail(email, password) {
+  if (!auth) throw new Error('Firebase não inicializado');
+  return createUserWithEmailAndPassword(auth, email, password);
+}
+
+export async function signInWithGoogleToken(idToken) {
+  if (!auth) throw new Error('Firebase não inicializado');
+  const credential = GoogleAuthProvider.credential(idToken);
+  return signInWithCredential(auth, credential);
+}
+
+export async function signInWithAppleToken(idToken, rawNonce) {
+  if (!auth) throw new Error('Firebase não inicializado');
+  const provider = new OAuthProvider('apple.com');
+  const credential = provider.credential({ idToken, rawNonce });
+  return signInWithCredential(auth, credential);
+}
+
+export function requestPhoneSignIn(phoneNumber, verifier) {
+  if (!auth) throw new Error('Firebase não inicializado');
+  return signInWithPhoneNumber(auth, phoneNumber, verifier);
+}
+
+export function confirmPhoneSignIn(confirmationResult, code) {
+  if (!confirmationResult) throw new Error('Confirmação de telefone inválida');
+  return confirmationResult.confirm(code);
 }
 
 export async function syncPlayerPosition(playerId, payload) {
@@ -53,6 +113,38 @@ export function subscribeToChests(callback) {
   });
 }
 
+export function subscribeToZombies(callback) {
+  if (!db) return () => {};
+  const q = collection(db, 'zombies');
+  return onSnapshot(q, snap => {
+    const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    callback(arr);
+  });
+}
+
+export function subscribeToClanMembers(callback) {
+  if (!db) return () => {};
+  const q = collection(db, 'clanMembers');
+  return onSnapshot(q, snap => {
+    const map = {};
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if (data.clanId) map[d.id] = data.clanId;
+    });
+    callback(map);
+  });
+}
+
+export function subscribeToClans(callback) {
+  if (!db) return () => {};
+  const q = collection(db, 'clans');
+  return onSnapshot(q, snap => {
+    const map = {};
+    snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+    callback(map);
+  });
+}
+
 export async function createChest(chest) {
   if (!db) return;
   try {
@@ -60,11 +152,40 @@ export async function createChest(chest) {
   } catch (e) { console.warn('createChest error', e); }
 }
 
+export async function createZombie(zombie) {
+  if (!db) return;
+  try {
+    await setDoc(doc(db, 'zombies', zombie.id), zombie, { merge: true });
+  } catch (e) { console.warn('createZombie error', e); }
+}
+
 export async function markChestOpened(chestId, openedBy) {
   if (!db) return;
   try {
     await setDoc(doc(db, 'chests', chestId), { opened: true, openedBy, openedAt: new Date() }, { merge: true });
   } catch (e) { console.warn('markChestOpened error', e); }
+}
+
+export async function saveInventory(playerId, items) {
+  if (!db) return;
+  try {
+    await setDoc(doc(db, 'inventories', playerId), { items }, { merge: true });
+  } catch (e) { console.warn('saveInventory error', e); }
+}
+
+export async function setClanMembership(playerId, clanId, clanName = null, clanPhoto = null) {
+  if (!db) return;
+  const ops = [];
+  try {
+    ops.push(setDoc(doc(db, 'clanMembers', playerId), { playerId, clanId }, { merge: true }));
+    if (clanId) {
+      const clanPayload = { id: clanId };
+      if (clanName) clanPayload.name = clanName;
+      if (clanPhoto) clanPayload.photo = clanPhoto;
+      ops.push(setDoc(doc(db, 'clans', clanId), clanPayload, { merge: true }));
+    }
+    await Promise.all(ops);
+  } catch (e) { console.warn('setClanMembership error', e); throw e; }
 }
 
 export async function donateItemTransaction(fromId, toId, item) {
@@ -88,10 +209,24 @@ export async function donateItemTransaction(fromId, toId, item) {
 export default {
   init,
   isReady,
+  getAuthInstance,
+  onAuthStateChange,
+  signInWithEmail,
+  createAccountWithEmail,
+  signInWithGoogleToken,
+  signInWithAppleToken,
+  requestPhoneSignIn,
+  confirmPhoneSignIn,
+  saveInventory,
   syncPlayerPosition,
   subscribeToPlayers,
   subscribeToChests,
+  subscribeToZombies,
+  subscribeToClanMembers,
+  subscribeToClans,
   createChest,
+  createZombie,
   markChestOpened,
-  donateItemTransaction
+  donateItemTransaction,
+  setClanMembership
 };

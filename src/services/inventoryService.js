@@ -1,4 +1,6 @@
 // Serviço simples de inventário (em memória) para alpha
+import firebaseService from './firebaseService';
+
 const inventories = new Map();
 
 export function getInventory(playerId) {
@@ -9,6 +11,7 @@ export function getInventory(playerId) {
 export function addItem(playerId, item) {
   const inv = getInventory(playerId);
   inv.push({ ...item, instanceId: Date.now() + Math.random().toString(36).slice(2) });
+  if (firebaseService.isReady()) firebaseService.saveInventory(playerId, inv);
   return inv;
 }
 
@@ -16,6 +19,7 @@ export function removeItem(playerId, instanceId) {
   const inv = getInventory(playerId);
   const idx = inv.findIndex(i => i.instanceId === instanceId);
   if (idx >= 0) inv.splice(idx, 1);
+  if (firebaseService.isReady()) firebaseService.saveInventory(playerId, inv);
   return inv;
 }
 
@@ -26,5 +30,9 @@ export function donateItem(fromId, toId, instanceId) {
   const item = fromInv[idx];
   fromInv.splice(idx, 1);
   addItem(toId, { id: item.id, name: item.name, rarity: item.rarity, quantity: item.quantity });
+  if (firebaseService.isReady()) {
+    firebaseService.saveInventory(fromId, fromInv);
+    firebaseService.saveInventory(toId, getInventory(toId));
+  }
   return item;
 }
