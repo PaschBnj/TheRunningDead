@@ -25,6 +25,7 @@ export default function MapScreen() {
   const [inventory, setInventory] = useState([]);
   const [buffActive, setBuffActive] = useState(false);
   const [health, setHealth] = useState(MAX_HEALTH);
+  const [gameOver, setGameOver] = useState(false);
 
   // --- REFS PARA CORRIGIR O PROBLEMA DO "FRAME CONGELADO" ---
   const playerRef = useRef(null);
@@ -42,6 +43,12 @@ export default function MapScreen() {
     playerRef.current = player;
     zombiesRef.current = zombies;
   }, [player, zombies]);
+
+  useEffect(() => {
+        if (health <= 0 && !gameOver) {
+        handleDeath();
+        }
+  }, [health]);
 
   useEffect(() => {
     // tentativa de inicializar Firebase
