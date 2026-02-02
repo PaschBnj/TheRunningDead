@@ -1,17 +1,11 @@
-// Copie este arquivo para src/config/firebaseConfig.js e preencha com as credenciais do Firebase.
-// Não compartilhe esse arquivo em commits públicos.
-
+// Copie das configurações do Firebase Console (Web App) e mantenha este arquivo fora do git (já ignorado).
 export default {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_AUTH_DOMAIN',
-  projectId: 'YOUR_PROJECT_ID',
-  storageBucket: 'YOUR_STORAGE_BUCKET',
-  messagingSenderId: 'YOUR_MESSAGING_SENDER_ID',
-  appId: 'YOUR_APP_ID',
-  measurementId: 'YOUR_MEASUREMENT_ID (opcional)',
-  // Campos extras usados na tela de login (opcional, mas necessários para Google/Apple no Expo)
-  androidClientId: 'YOUR_ANDROID_CLIENT_ID',
-  iosClientId: 'YOUR_IOS_CLIENT_ID',
-  expoClientId: 'YOUR_EXPO_CLIENT_ID',
-  webClientId: 'YOUR_WEB_CLIENT_ID'
+  apiKey: "AIzaSyAQA-lEiPzI5yD3gCZ25PxtWGyODqtJUE4",
+  authDomain: "the-running-dead-a7c13.firebaseapp.com",
+  databaseURL: "https://the-running-dead-a7c13-default-rtdb.firebaseio.com",
+  projectId: "the-running-dead-a7c13",
+  storageBucket: "the-running-dead-a7c13.appspot.com",
+  messagingSenderId: "74806218674",
+  appId: "1:74806218674:web:f6d0c7526f63563fa4deab",
+  measurementId: "G-2WF1MF67GB"
 };
